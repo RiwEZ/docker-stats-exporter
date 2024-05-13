@@ -8,6 +8,10 @@ Build it yourself by
 
 and put this into the server that you wish to gather docker stats (need to have docker installed).
 
+## Grafana Dashboard Example
+You can try importing `grafana.json` for below dashboard example.
+<img width="full" alt="image" src="https://github.com/RiwEZ/docker-stats-exporter/assets/55591062/342d15ba-179d-450d-b14e-496154c97b98">
+
 ## Refs 
 - https://github.com/docker/cli/blob/master/cli/command/container/stats_helpers.go
 - https://github.com/wywywywy/docker_stats_exporter
