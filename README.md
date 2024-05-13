@@ -6,7 +6,11 @@ Build it yourself by
 
 ```go build -o <binary_name> main.go```  
 
-and put this into the server that you wish to gather docker stats (need to have docker installed).
+and put this into the server that you wish to gather docker stats and use it with
+
+```
+<binary_name> --port ":<port>" --interval <update_interval>
+```
 
 ## Grafana Dashboard Example
 You can try importing `grafana.json` for below dashboard example.
