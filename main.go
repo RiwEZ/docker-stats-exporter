@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"os"
 	"time"
@@ -86,18 +87,20 @@ func calcNetwork(network map[string]types.NetworkStats) (float64, float64) {
 	return rx, tx
 }
 
-func collectContainersStats(ctx context.Context, client *client.Client, metrics *metrics) {
+func collectContainersStats(ctx context.Context, client *client.Client, metrics *metrics, interval int) {
 	for {
 		// get all containers
 		containers, err := client.ContainerList(ctx, containertypes.ListOptions{})
 		if err != nil {
-			panic(err)
+			log.Error().Err(err)
+			continue
 		}
 
 		for _, container := range containers {
 			resp, err := client.ContainerStats(ctx, container.ID, false)
 			if err != nil {
-				panic(err)
+				log.Error().Err(err)
+				continue
 			}
 			defer resp.Body.Close()
 
@@ -111,8 +114,8 @@ func collectContainersStats(ctx context.Context, client *client.Client, metrics 
 			)
 
 			if err := dec.Decode(&v); err != nil {
-				// handle this?
-				panic(err)
+				log.Error().Err(err)
+				continue
 			}
 
 			daemonOsType = resp.OSType
@@ -124,12 +127,11 @@ func collectContainersStats(ctx context.Context, client *client.Client, metrics 
 				memLimit = float64(v.MemoryStats.Limit)
 				memPercent = calcMemPercentUnixNoCahce(memUsage, memLimit)
 			} else {
-				// do some shits for window
+				// TODO: do some shits for window
 			}
 
 			netRx, netTx := calcNetwork(v.Networks)
 
-      // why is this not updating ??
 			metrics.cpuPercent.With(
 				prometheus.Labels{"name": container.Names[0], "id": container.ID}).Set(cpuPercent)
 			metrics.blkRead.With(
@@ -146,17 +148,8 @@ func collectContainersStats(ctx context.Context, client *client.Client, metrics 
 				prometheus.Labels{"name": container.Names[0], "id": container.ID}).Set(netRx)
 			metrics.netTx.With(
 				prometheus.Labels{"name": container.Names[0], "id": container.ID}).Set(netTx)
-
-      /*
-			log.Info().Msgf("CPU%%, MEM%% = %v, %v", cpuPercent, memPercent)
-			log.Info().Msgf("MEM / LIMIT = %v / %v", memUsage, memLimit)
-			log.Info().Msgf("blkRead, blkWrite = %v, %v", blkRead, blkWrite)
-			log.Info().Msgf("NET TX / RX = %v, %v", netRx, netTx)
-      */
 		}
-
-		//log.Info().Msgf("%v")
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(time.Duration(interval) * time.Millisecond)
 	}
 }
 
@@ -175,35 +168,35 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m := &metrics{
 		cpuPercent: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_cpu_percent",
-			Help: "",
+			Help: "CPU% usage of the container",
 		}, []string{"name", "id"}),
 		blkRead: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_blk_read",
-			Help: "",
+			Help: "I/O read usage",
 		}, []string{"name", "id"}),
 		blkWrite: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_blk_write",
-			Help: "",
+			Help: "I/O write usage",
 		}, []string{"name", "id"}),
 		memUsage: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_mem_usage",
-			Help: "",
+			Help: "Memory used",
 		}, []string{"name", "id"}),
 		memLimit: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_mem_limit",
-			Help: "",
+			Help: "Memory Limit",
 		}, []string{"name", "id"}),
 		memPercent: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_mem_percent",
-			Help: "",
+			Help: "Memory used in %",
 		}, []string{"name", "id"}),
 		netRx: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_net_rx",
-			Help: "",
+			Help: "Network I/O receiving",
 		}, []string{"name", "id"}),
 		netTx: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "dockerstats_net_tx",
-			Help: "",
+			Help: "Network I/O transfering",
 		}, []string{"name", "id"}),
 	}
 
@@ -219,20 +212,28 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 }
 
 func main() {
+	var (
+		port     = flag.String("port", ":8080", "The port to listen on for prometheus HTTP requests.")
+		interval = flag.Int("interval", 1000, "Interval for gathering docker stats in milliseconds")
+	)
+  flag.Parse()
+
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	ctx := context.Background()
 	client, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		panic(err)
+		log.Fatal().Err(err)
 	}
 	defer client.Close()
 
 	reg := prometheus.NewRegistry()
 	m := newMetrics(reg)
 
-	go collectContainersStats(ctx, client, m)
+	go collectContainersStats(ctx, client, m, *interval)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
-	http.ListenAndServe(":2112", nil)
+
+	log.Info().Msgf("HTTP server started at " + *port)
+	log.Fatal().Err(http.ListenAndServe(*port, nil))
 }
