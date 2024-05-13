@@ -4,7 +4,9 @@ Simple exporter for `docker stats` command to prometheus written in Go.
 ## How to use?
 Build it yourself by
 
-```go build -o <binary_name> main.go```  
+```
+go build -o <binary_name> main.go
+```  
 
 and put this into the server that you wish to gather docker stats and use it with
 
